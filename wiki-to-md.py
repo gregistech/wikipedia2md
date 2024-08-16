@@ -20,18 +20,21 @@ def get_wiki_page(topic):
 
 def download_image(url, folder = "./"):
     """Download an image and save it to a local folder."""
-    # TODO: optimize so we don't download unnecessarily
     excludes = [ "Commons-logo.svg" ]
     image_name = os.path.basename(urlparse(url).path)
     if image_name not in excludes:
-        response = requests.get(url, headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64"})
-        if response.status_code == 200:
-            image_path = os.path.join(folder, image_name)
-            with open(image_path, 'wb') as file:
-                file.write(response.content)
-            return image_name
+        image_path = os.path.join(folder, image_name)
+        if not os.path.isfile(image_path):
+            response = requests.get(url, headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64"})
+            if response.status_code == 200:
+                with open(image_path, 'wb') as file:
+                    file.write(response.content)
+                return image_name
+            else:
+                print(f"Response for {url} was: {response.status_code}!")
         else:
-            print(f"Response for {url} was: {response.status_code}!")
+            print(f"Image {image_name} already downloaded.")
+            return image_name
     else:
         print(f"Image {image_name} excluded.")
     return None
