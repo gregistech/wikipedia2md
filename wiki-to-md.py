@@ -11,8 +11,11 @@ def get_wiki_page(topic):
     try:
         page = wikipedia.page(topic)
     except wikipedia.exceptions.DisambiguationError as e:
-        print("Disambiguation error: ", e.options)
-        return None
+        print("Disambiguation problem, pick your desired one.")
+        for i, option in enumerate(e.options):
+            print(f"{i+1}. {option}")
+        picked = e.options[int(input("Your pick: ")) - 1]
+        return get_wiki_page(picked)
     except wikipedia.exceptions.PageError:
         print(f"Page not found for the topic: {topic}")
         return None
@@ -20,7 +23,7 @@ def get_wiki_page(topic):
 
 def download_image(url, folder = "./"):
     """Download an image and save it to a local folder."""
-    excludes = [ "Commons-logo.svg" ]
+    excludes = [ "Commons-logo.svg", "Question_book-new.svg", "Ambox_important.svg", "Confusion.svg", "P_cartesian_graph.svg", "Disambig.svg" ]
     image_name = os.path.basename(urlparse(url).path)
     if image_name not in excludes:
         image_path = os.path.join(folder, image_name)
@@ -62,7 +65,7 @@ def apply_prompt_to_markdown(prompt, markdown):
 
 # FIXME: unreliable prompt
 def markdown_remove_excludes(markdown):
-    excludes = ["Jegyzetek", "További információk", "Kapcsolódó szócikkek"]
+    excludes = ["Jegyzetek", "További információk", "Kapcsolódó szócikkek", "Külső hivatkozások", "Lásd még" ]
     excludes_text = ""
     for exclude in excludes:
         excludes_text += f"{exclude}, "
@@ -76,7 +79,7 @@ def markdown_remove_excludes(markdown):
 
 def fix_latex_in_markdown(markdown):
     prompt = """
-    Proper LaTeX syntax for markdown is $latex expression$ for inline, and $$latex expression$$ for a block.
+    Proper LaTeX syntax for markdown is $latex expression$ for inline, and $$latex expression$$ for a block. (DO NOT PUT A SPACE AFTER THE STARTING OR BEFORE THE ENDING $)
     Our conversion made some mistakes with it, and math notations are all over the place.
     Return it with the aforementioned proper syntax (decide if inline (like if it's a number and part of the text) or a block (for longer and more standalone equations) will look better), and write nothing more. Here's the text:\n
     """
@@ -99,10 +102,12 @@ def page_to_markdown(page):
 
     return markdown
 
-def text_to_file(text, name, folder = "./"):
+def text_to_file(text, name, folder="./"):
     path = os.path.join(folder, name)
-    with open(path, 'w') as file:
-        file.write(text)
+    if os.path.isfile(path):
+        text = f"\n{text}"
+    with open(path, 'a') as file:  # Use 'a' mode to append if file exists, or create a new file
+        file.write(text) 
     return path
 
 
@@ -111,32 +116,59 @@ parser = argparse.ArgumentParser(
     description="Generate a markdown file for a provided topic."
 )
 parser.add_argument(
-    "topic",
+    "topics",
+    nargs="+",
     type=str,
-    help="The topic to generate a markdown file for.",
+    help="The topics to generate a markdown file for.",
 )
 parser.add_argument(
-    "--lang",
+    "--langs",
     type=str,
-    default="hu",
-    help="The language of Wikipedia to use.",
+    nargs="+",
+    help="The languages of Wikipedia to use.",
 )
 parser.add_argument(
     "--root",
     type=str,
-    default="hu",
+    default="./",
     help="Where to store article and images.",
+)
+parser.add_argument(
+    "--outputs",
+    type=str,
+    nargs="+",
+    default=[],
+    help="If you want the filenames to be different than the given topic.",
 )
 args = parser.parse_args()
 
-wikipedia.set_lang(args.lang)
+topics = args.topics or []
+langs = args.langs or []
+outputs = args.outputs or []
 
-page = get_wiki_page(args.topic)
+import concurrent.futures
 
-markdown = page_to_markdown(page)
-#markdown = markdown_remove_excludes(markdown)
-markdown = fix_latex_in_markdown(markdown)
-markdown += f"\n{page_to_markdown_images(page, args.root)}"
+def process_topic(i, topic, lang, output, root):
+    print(f"Using lang {lang} for {topic}.")
+    wikipedia.set_lang(lang)
 
-path = text_to_file(markdown, f"{args.topic}.md", args.root)
-print(f"Article saved to: {path}")
+    print(f"Getting page for {topic}.")
+    page = get_wiki_page(topic)
+
+    markdown = page_to_markdown(page)
+    markdown = fix_latex_in_markdown(markdown)
+    markdown += f"\n{page_to_markdown_images(page, root)}"
+    path = text_to_file(markdown, f"{output}.md", root)
+    print(f"Topic {topic} saved to: {path}")
+
+with concurrent.futures.ThreadPoolExecutor() as executor:
+    futures = []
+    for i, topic in enumerate(topics):
+        print(f"Topic {topic} scheduled!")
+        lang = langs[i] if i < len(langs) else "hu"
+        output = outputs[i] if i < len(outputs) else topic
+        if output == "":
+            output = topic
+        futures.append(executor.submit(process_topic, i, topic, lang, output, args.root))
+    concurrent.futures.wait(futures)
+
